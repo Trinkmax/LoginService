@@ -1,0 +1,414 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+
+// ---------- PINES MOTOR ----------
+const int ENA = D1;
+const int IN1 = D2;
+const int IN2 = D3;
+
+const int ENB = D5;
+const int IN3 = D6;
+const int IN4 = D7;
+
+// Buzzer
+const int BUZZER = D0;
+
+// Velocidad (0–1023)
+int velocidad = 850;
+
+// ---------- WIFI ----------
+const char* ssid = "AUTO_NICO";
+const char* password = "12345678";
+
+ESP8266WebServer server(80);
+
+// ---------- FUNCIONES MOTOR ----------
+void pararMotores() {
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+void adelante() {
+  // Motor A invertido, Motor B normal
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+
+  analogWrite(ENA, velocidad);
+  analogWrite(ENB, velocidad);
+}
+
+void atras() {
+  // Motor A invertido, Motor B normal
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+
+  analogWrite(ENA, velocidad);
+  analogWrite(ENB, velocidad);
+}
+
+// Giro suave estilo auto real
+void izquierda() {
+  // Ambos adelante, pero rueda izquierda con menos fuerza
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+
+  // Ruedas izquierdas = menos fuerza para girar
+  analogWrite(ENA, velocidad * 0.40);
+  analogWrite(ENB, velocidad);
+}
+
+void derecha() {
+  // Ambos adelante, pero rueda derecha con menos fuerza
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+
+  // Ruedas derechas = menos fuerza
+  analogWrite(ENA, velocidad);
+  analogWrite(ENB, velocidad * 0.40);
+}
+
+void bocina() {
+  tone(BUZZER, 1000);
+  delay(200);
+  noTone(BUZZER);
+}
+
+// ---------- CONTROL SERIAL ----------
+void procesarComandoSerial() {
+  if (Serial.available() > 0) {
+    char comando = Serial.read();
+    
+    switch(comando) {
+      case 'w':
+      case 'W':
+        Serial.println("⬆ ADELANTE");
+        adelante();
+        break;
+        
+      case 's':
+      case 'S':
+        Serial.println("⬇ ATRAS");
+        atras();
+        break;
+        
+      case 'a':
+      case 'A':
+        Serial.println("⬅ IZQUIERDA");
+        izquierda();
+        break;
+        
+      case 'd':
+      case 'D':
+        Serial.println("➡ DERECHA");
+        derecha();
+        break;
+        
+      case ' ':
+      case 'x':
+      case 'X':
+        Serial.println("⏹ PARAR");
+        pararMotores();
+        break;
+        
+      case 'h':
+      case 'H':
+        Serial.println("🔊 BOCINA");
+        bocina();
+        break;
+        
+      case '+':
+        velocidad = min(1023, velocidad + 50);
+        Serial.print("Velocidad: ");
+        Serial.println(velocidad);
+        break;
+        
+      case '-':
+        velocidad = max(300, velocidad - 50);
+        Serial.print("Velocidad: ");
+        Serial.println(velocidad);
+        break;
+        
+      case '?':
+        Serial.println("\n====== CONTROLES DEL AUTO ======");
+        Serial.println("W = Adelante");
+        Serial.println("S = Atras");
+        Serial.println("A = Izquierda");
+        Serial.println("D = Derecha");
+        Serial.println("X = Parar");
+        Serial.println("H = Bocina");
+        Serial.println("+ = Aumentar velocidad");
+        Serial.println("- = Disminuir velocidad");
+        Serial.println("? = Mostrar ayuda");
+        Serial.println("================================\n");
+        break;
+        
+      default:
+        // Ignorar otros caracteres (saltos de línea, etc.)
+        break;
+    }
+  }
+}
+
+// ---------- HTML UI ----------
+String htmlPage() {
+  String page = R"====(
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🚗 Auto WiFi Control</title>
+
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+  }
+
+  .container {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 25px;
+    padding: 40px 30px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    max-width: 400px;
+    width: 100%;
+  }
+
+  h1 {
+    text-align: center;
+    color: #333;
+    font-size: 32px;
+    margin-bottom: 30px;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+  }
+
+  .controls {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .row {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+  }
+
+  .btn {
+    width: 100px;
+    height: 100px;
+    font-size: 40px;
+    border: none;
+    border-radius: 15px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    background: linear-gradient(145deg, #ffffff, #e6e6e6);
+    user-select: none;
+  }
+
+  .btn:active {
+    transform: scale(0.95);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+
+  .btn-forward {
+    background: linear-gradient(145deg, #4ade80, #22c55e);
+    color: white;
+  }
+
+  .btn-back {
+    background: linear-gradient(145deg, #60a5fa, #3b82f6);
+    color: white;
+  }
+
+  .btn-left, .btn-right {
+    background: linear-gradient(145deg, #fbbf24, #f59e0b);
+    color: white;
+  }
+
+  .btn-stop {
+    background: linear-gradient(145deg, #ef4444, #dc2626);
+    color: white;
+    font-size: 36px;
+  }
+
+  .btn-horn {
+    width: 220px;
+    height: 70px;
+    font-size: 24px;
+    background: linear-gradient(145deg, #a78bfa, #8b5cf6);
+    color: white;
+    font-weight: bold;
+    margin-top: 10px;
+  }
+
+  .status {
+    text-align: center;
+    margin-top: 20px;
+    padding: 10px;
+    background: rgba(102, 126, 234, 0.1);
+    border-radius: 10px;
+    color: #667eea;
+    font-weight: bold;
+  }
+
+  @media (max-width: 400px) {
+    .btn {
+      width: 80px;
+      height: 80px;
+      font-size: 32px;
+    }
+    .btn-horn {
+      width: 180px;
+      height: 60px;
+      font-size: 20px;
+    }
+  }
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+  <h1>🚗 Control del Auto</h1>
+  
+  <div class="controls">
+    <div class="row">
+      <button class="btn btn-forward" onclick="send('forward')">⬆</button>
+    </div>
+
+    <div class="row">
+      <button class="btn btn-left" onclick="send('left')">⬅</button>
+      <button class="btn btn-stop" onclick="send('stop')">⏹</button>
+      <button class="btn btn-right" onclick="send('right')">➡</button>
+    </div>
+
+    <div class="row">
+      <button class="btn btn-back" onclick="send('back')">⬇</button>
+    </div>
+
+    <div class="row">
+      <button class="btn btn-horn" onclick="send('horn')">🔊 Bocina</button>
+    </div>
+  </div>
+
+  <div class="status" id="status">Listo para conducir</div>
+</div>
+
+<script>
+  function send(cmd) {
+    let status = document.getElementById('status');
+    let messages = {
+      'forward': '⬆ Avanzando',
+      'back': '⬇ Retrocediendo',
+      'left': '⬅ Girando izquierda',
+      'right': '➡ Girando derecha',
+      'stop': '⏹ Detenido',
+      'horn': '🔊 Bocina!'
+    };
+    
+    status.textContent = messages[cmd] || 'Enviando...';
+    fetch("/cmd?accion=" + cmd);
+    
+    if(cmd !== 'stop') {
+      setTimeout(() => {
+        status.textContent = 'Listo para conducir';
+      }, 1500);
+    }
+  }
+</script>
+
+</body>
+</html>
+)====";
+  return page;
+}
+
+// ---------- SERVIDOR ----------
+void handleRoot() {
+  server.send(200, "text/html", htmlPage());
+}
+
+void handleCmd() {
+  if (!server.hasArg("accion")) {
+    server.send(400, "text/plain", "Missing arg");
+    return;
+  }
+
+  String a = server.arg("accion");
+
+  if      (a == "forward")  adelante();
+  else if (a == "back")     atras();
+  else if (a == "left")     izquierda();
+  else if (a == "right")    derecha();
+  else if (a == "stop")     pararMotores();
+  else if (a == "horn")     bocina();
+
+  server.send(200, "text/plain", "OK");
+}
+
+// ---------- SETUP ----------
+void setup() {
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  pinMode(ENB, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  pinMode(BUZZER, OUTPUT);
+
+  pararMotores();
+
+  Serial.begin(115200);
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, password);
+
+  server.on("/", handleRoot);
+  server.on("/cmd", handleCmd);
+  server.begin();
+
+  Serial.println("\n\n🚗 ====== AUTO WIFI LISTO ======");
+  Serial.print("IP del Auto: ");
+  Serial.println(WiFi.softAPIP());
+  Serial.println("\n📱 Control Web: Conectate a la red AUTO_NICO");
+  Serial.println("⌨️  Control Serial: Envia '?' para ver comandos");
+  Serial.println("================================\n");
+}
+
+// ---------- LOOP ----------
+void loop() {
+  server.handleClient();
+  procesarComandoSerial();
+}
